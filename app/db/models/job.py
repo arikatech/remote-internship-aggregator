@@ -1,7 +1,8 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Text, ForeignKey
+
+from sqlalchemy import String, Boolean, DateTime, Text, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Index
 
 from app.db.base import Base
 
@@ -23,16 +24,29 @@ class Job(Base):
     source = relationship("Source")
 
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
 
     canonical_url: Mapped[str] = mapped_column(String(800), unique=True, nullable=False)
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        server_default="{}",
+    )
 
     __table_args__ = (
         Index("ix_jobs_external_id", "external_id"),
         Index("ix_jobs_fingerprint", "fingerprint"),
+        Index("ix_jobs_tags_gin", "tags", postgresql_using="gin"),
     )

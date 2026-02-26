@@ -4,6 +4,14 @@ from sqlalchemy import select
 
 from app.db.session import get_db
 from app.db.models.job import Job
+from app.domain.usecases.list_jobs import ListJobsParams, ListJobsUseCase
+from app.domain.schemas.job import JobOut
+
+def _parse_csv(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    items = [v.strip().lower() for v in value.split(",") if v.strip()]
+    return items or None
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -35,6 +43,40 @@ def list_jobs(
         }
         for j in rows
     ]
+
+@router.get("/jobs")
+def list_jobs(
+    q: str | None = Query(default=None),
+    tags: str | None = Query(default=None),
+    tags_mode: str = Query(default="any", pattern="^(any|all)$"),
+    source_id: int | None = Query(default=None),
+    internship_only: bool = Query(default=False),
+    remote: bool | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    sort: str = Query(default="recent", pattern="^(recent)$"),
+    db: Session = Depends(get_db),
+):
+    params = ListJobsParams(
+        q=q,
+        tags=_parse_csv(tags),
+        tags_mode="all" if tags_mode == "all" else "any",
+        source_id=source_id,
+        internship_only=internship_only,
+        remote=remote,
+        limit=limit,
+        offset=offset,
+        sort="recent",
+    )
+
+    jobs, total = ListJobsUseCase(db).execute(params)
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [JobOut.model_validate(j) for j in jobs],
+    }
 
 
 @router.get("/{job_id}")

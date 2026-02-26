@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,10 @@ from app.connectors.registry import get_connector
 from app.db.models.source import Source
 from app.db.models.ingestion_run import IngestionRun
 from app.domain.usecases.ingest_job import IngestJobUseCase
+
+from app.core.config import settings
+from app.infra.telegram.client import TelegramClient
+from app.domain.usecases.notify_subscriptions import NotifySubscriptionsUseCase
 
 
 class IngestSourceUseCase:
@@ -38,14 +43,23 @@ class IngestSourceUseCase:
 
         ingest_job = IngestJobUseCase(self.db)
 
+        notifier: NotifySubscriptionsUseCase | None = None
+        if settings.telegram_bot_token:
+            tg = TelegramClient(settings.telegram_bot_token)
+            notifier = NotifySubscriptionsUseCase(self.db, tg)
+
         inserted = 0
         found = 0
+
         try:
             for job_create in connector.fetch(ctx):
                 found += 1
                 job, created = ingest_job.execute(job_create)
+
                 if created:
                     inserted += 1
+                    if notifier:
+                        notifier.execute_for_new_job(job)
 
             run.finished_at = datetime.utcnow()
             run.jobs_found = found
@@ -56,8 +70,11 @@ class IngestSourceUseCase:
             return {"source_id": source.id, "found": found, "inserted": inserted}
 
         except Exception as e:
+            self.db.rollback()  # important: clear failed transaction state
+
             run.finished_at = datetime.utcnow()
             run.status = "failed"
             run.error = str(e)[:500]
+            self.db.add(run)
             self.db.commit()
             raise
