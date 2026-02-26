@@ -10,6 +10,7 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.subscriptions import router as subscriptions_router
 from app.scheduler.scheduler import start_scheduler, shutdown_scheduler
 from app.api.routes.telegram import router as telegram_router
+from app.core.migrations import run_migrations_if_enabled
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +23,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     setup_logging(settings.log_level)
+
+    run_migrations_if_enabled()
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.include_router(health_router)
