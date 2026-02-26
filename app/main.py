@@ -24,7 +24,9 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     setup_logging(settings.log_level)
 
+    print("=== RUNNING MIGRATIONS CHECK ===")
     run_migrations_if_enabled()
+    print("=== MIGRATIONS CHECK DONE ===")
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.include_router(health_router)
