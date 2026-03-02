@@ -1,0 +1,22 @@
+name: Daily ingestion
+
+on:
+  schedule:
+    # Around 9AM Europe/Rome (DST-safe)
+    - cron: "5 7 * * *"
+    - cron: "5 8 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call ops ingest endpoint
+        run: |
+          set -e
+          echo "Calling ingestion..."
+          curl -sS -X POST "${{ secrets.OPS_INGEST_URL }}?key=${{ secrets.OPS_INGEST_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 180
+          echo ""
+          echo "Done."
