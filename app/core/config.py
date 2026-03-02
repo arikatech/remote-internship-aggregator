@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
 
     # Scheduler (Milestone 6)
+    ops_ingest_key: str | None = None
     scheduler_enabled: bool = True
     scheduler_timezone: str = "Europe/Rome"
     scheduler_ingest_cron: str = "0 9 * * *"  # minute hour day month day-of-week
