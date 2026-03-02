@@ -14,12 +14,26 @@ from app.infra.telegram.client import TelegramClient
 def format_job_message(job: Job) -> str:
     tags = ", ".join(job.tags or [])
     loc = job.location or "N/A"
+    remote = "🌍 Remote" if job.remote else "🏢 On-site/Hybrid"
     return (
-        f"{job.title}\n"
-        f"{job.company} — {loc}\n"
-        f"Tags: {tags}\n"
-        f"{job.url}"
+        f"🆕 {job.title}\n"
+        f"🏢 {job.company}\n"
+        f"📍 {loc} • {remote}\n"
+        f"🏷 {tags}\n"
+        f"🔗 {job.url}"
     )
+
+
+def build_job_keyboard(job: Job) -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": "Open 🔗", "url": job.url}],
+            [
+                {"text": "Pause notifications ⛔", "callback_data": "toggle:active"},
+                {"text": "Settings ⚙️", "callback_data": "menu:settings"},
+            ],
+        ]
+    }
 
 
 class NotifySubscriptionsUseCase:
@@ -50,7 +64,11 @@ class NotifySubscriptionsUseCase:
                 continue  # already notified
 
             try:
-                self.telegram.send_message(s.telegram_chat_id, format_job_message(job))
+                self.telegram.send_message(
+                    s.telegram_chat_id,
+                    format_job_message(job),
+                    reply_markup=build_job_keyboard(job),
+                )
                 delivery.status = "sent"
                 delivery.sent_at = datetime.utcnow()
                 sent_count += 1

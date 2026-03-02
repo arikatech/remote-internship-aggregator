@@ -10,23 +10,22 @@ class TelegramClient:
         self._token = token
         self._timeout = httpx.Timeout(timeout_s)
 
-    def send_message(
-        self,
-        chat_id: str | int,
-        text: str,
-        reply_markup: Optional[dict[str, Any]] = None,
-        disable_web_page_preview: bool = True,
-    ) -> None:
+    def send_message(self, chat_id: str, text: str, reply_markup: dict | None = None) -> None:
         url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        payload: dict[str, Any] = {
+        payload = {
             "chat_id": chat_id,
             "text": text,
-            "disable_web_page_preview": disable_web_page_preview,
+            "disable_web_page_preview": True,
         }
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
 
-        self._post(url, payload, "sendMessage")
+        with httpx.Client(timeout=self._timeout) as client:
+            r = client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            if not data.get("ok", False):
+                raise RuntimeError(f"Telegram sendMessage failed: {data}")
 
     def edit_message_text(
         self,

@@ -12,11 +12,12 @@ AVAILABLE_TAGS = [
     "python", "dotnet", "java", "cpp", "csharp", "javascript", "typescript", "go",
     "data", "ml",
     "devops", "cloud",
-    "internship", "mid_level", "senior", "new_grad"
+    "internship", "mid_level", "senior", "new_grad",
 ]
 
 CB_MENU = "menu"
 CB_TAG_TOGGLE = "tag:toggle"
+CB_TOGGLE = "toggle"
 
 
 class TelegramBotUseCase:
@@ -36,7 +37,6 @@ class TelegramBotUseCase:
                 self._send_main_menu(chat_id)
                 return
 
-            # Optional power-user command: /tags python, ml, backend
             if text.startswith("/tags"):
                 self._ensure_subscription(chat_id)
                 payload = text.removeprefix("/tags").strip()
@@ -62,6 +62,7 @@ class TelegramBotUseCase:
 
             self._ensure_subscription(chat_id)
 
+            # navigation
             if data.startswith(f"{CB_MENU}:"):
                 action = data.split(":", 1)[1]
                 if action == "main":
@@ -70,6 +71,9 @@ class TelegramBotUseCase:
                 if action == "tags":
                     self._edit_to_manage_tags(chat_id, message_id)
                     return
+                if action == "settings":
+                    self._edit_to_settings(chat_id, message_id)
+                    return
                 if action == "mytags":
                     self._edit_to_my_tags(chat_id, message_id)
                     return
@@ -77,11 +81,36 @@ class TelegramBotUseCase:
                     self._edit_to_help(chat_id, message_id)
                     return
 
+            # tag toggles
             if data.startswith(f"{CB_TAG_TOGGLE}:"):
                 tag = data.split(":", 2)[2]
                 self._toggle_tag(chat_id, tag)
                 self._edit_to_manage_tags(chat_id, message_id)
                 return
+
+            # settings toggles
+            if data.startswith(f"{CB_TOGGLE}:"):
+                what = data.split(":", 1)[1]
+
+                if what == "remote":
+                    self._cycle_remote(chat_id)
+                    self._edit_to_settings(chat_id, message_id)
+                    return
+
+                if what == "internship_only":
+                    self._toggle_internship_only(chat_id)
+                    self._edit_to_settings(chat_id, message_id)
+                    return
+
+                if what == "tags_mode":
+                    self._toggle_tags_mode(chat_id)
+                    self._edit_to_settings(chat_id, message_id)
+                    return
+
+                if what == "active":
+                    self._toggle_active(chat_id)
+                    self._edit_to_settings(chat_id, message_id)
+                    return
 
             self.tg.send_message(chat_id=chat_id, text="Unknown action. Use /start.")
             return
@@ -104,6 +133,7 @@ class TelegramBotUseCase:
             tags=[],
             tags_mode="any",
             internship_only=False,
+            remote=None,
             is_active=True,
         )
         self.db.add(sub)
@@ -111,22 +141,20 @@ class TelegramBotUseCase:
         self.db.refresh(sub)
         return sub
 
-    def _get_tags(self, chat_id: int) -> list[str]:
+    def _get_subscription(self, chat_id: int) -> Subscription:
         chat_id_s = str(chat_id)
-        sub = (
+        return (
             self.db.query(Subscription)
             .filter(Subscription.telegram_chat_id == chat_id_s)
             .one()
         )
+
+    def _get_tags(self, chat_id: int) -> list[str]:
+        sub = self._get_subscription(chat_id)
         return list(sub.tags or [])
 
     def _set_tags(self, chat_id: int, tags: list[str]) -> None:
-        chat_id_s = str(chat_id)
-        sub = (
-            self.db.query(Subscription)
-            .filter(Subscription.telegram_chat_id == chat_id_s)
-            .one()
-        )
+        sub = self._get_subscription(chat_id)
 
         uniq: list[str] = []
         seen: set[str] = set()
@@ -152,6 +180,40 @@ class TelegramBotUseCase:
         else:
             tags.append(tag)
         self._set_tags(chat_id, tags)
+
+    # ----------------- Settings mutations -----------------
+
+    def _toggle_internship_only(self, chat_id: int) -> None:
+        sub = self._get_subscription(chat_id)
+        sub.internship_only = not bool(sub.internship_only)
+        self.db.add(sub)
+        self.db.commit()
+
+    def _cycle_remote(self, chat_id: int) -> None:
+        """
+        remote: None (any) -> True (remote only) -> False (on-site only) -> None
+        """
+        sub = self._get_subscription(chat_id)
+        if sub.remote is None:
+            sub.remote = True
+        elif sub.remote is True:
+            sub.remote = False
+        else:
+            sub.remote = None
+        self.db.add(sub)
+        self.db.commit()
+
+    def _toggle_tags_mode(self, chat_id: int) -> None:
+        sub = self._get_subscription(chat_id)
+        sub.tags_mode = "all" if (sub.tags_mode or "any") == "any" else "any"
+        self.db.add(sub)
+        self.db.commit()
+
+    def _toggle_active(self, chat_id: int) -> None:
+        sub = self._get_subscription(chat_id)
+        sub.is_active = not bool(sub.is_active)
+        self.db.add(sub)
+        self.db.commit()
 
     # ----------------- Text command -----------------
 
@@ -195,11 +257,32 @@ class TelegramBotUseCase:
             reply_markup=_kb_manage_tags(selected),
         )
 
-    def _edit_to_my_tags(self, chat_id: int, message_id: int) -> None:
-        tags = self._get_tags(chat_id)
-        txt = "Your tags:\n" + (
-            "\n".join(f"• {t}" for t in tags) if tags else "(none yet)"
+    def _edit_to_settings(self, chat_id: int, message_id: int) -> None:
+        sub = self._get_subscription(chat_id)
+        self.tg.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text="Settings:",
+            reply_markup=_kb_settings(sub),
         )
+
+    def _edit_to_my_tags(self, chat_id: int, message_id: int) -> None:
+        sub = self._get_subscription(chat_id)
+        tags = list(sub.tags or [])
+        remote_label = _fmt_remote(sub.remote)
+        internship_label = "Internships only ✅" if sub.internship_only else "Internships only ❌"
+        mode_label = "Tags mode: ANY" if (sub.tags_mode or "any") == "any" else "Tags mode: ALL"
+        active_label = "Notifications: ON ✅" if sub.is_active else "Notifications: OFF ⛔"
+
+        txt = (
+            "Your current setup:\n"
+            + ("• Tags:\n" + ("\n".join(f"  - {t}" for t in tags) if tags else "  - (none)") + "\n")
+            + f"• {remote_label}\n"
+            + f"• {internship_label}\n"
+            + f"• {mode_label}\n"
+            + f"• {active_label}\n"
+        )
+
         self.tg.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
@@ -211,7 +294,8 @@ class TelegramBotUseCase:
         txt = (
             "How it works:\n"
             "• Pick tags you care about.\n"
-            "• When new jobs match your tags, I send them here.\n\n"
+            "• Adjust settings (remote/internships).\n"
+            "• When new jobs match, I send them here.\n\n"
             "Commands:\n"
             "• /start\n"
             "• /tags python, ml, backend"
@@ -228,14 +312,19 @@ def _kb_main_menu() -> dict:
     return {
         "inline_keyboard": [
             [{"text": "🏷 Manage tags", "callback_data": f"{CB_MENU}:tags"}],
-            [{"text": "✅ My tags", "callback_data": f"{CB_MENU}:mytags"}],
+            [{"text": "⚙️ Settings", "callback_data": f"{CB_MENU}:settings"}],
+            [{"text": "✅ My setup", "callback_data": f"{CB_MENU}:mytags"}],
             [{"text": "❓ Help", "callback_data": f"{CB_MENU}:help"}],
         ]
     }
 
 
 def _kb_back_to_menu() -> dict:
-    return {"inline_keyboard": [[{"text": "⬅️ Back", "callback_data": f"{CB_MENU}:main"}]]}
+    return {
+        "inline_keyboard": [
+            [{"text": "⬅️ Back", "callback_data": f"{CB_MENU}:main"}]
+        ]
+    }
 
 
 def _kb_manage_tags(selected: set[str]) -> dict:
@@ -255,3 +344,35 @@ def _kb_manage_tags(selected: set[str]) -> dict:
 
     rows.append([{"text": "⬅️ Back", "callback_data": f"{CB_MENU}:main"}])
     return {"inline_keyboard": rows}
+
+
+def _fmt_remote(remote: bool | None) -> str:
+    if remote is True:
+        return "Remote: remote-only ✅"
+    if remote is False:
+        return "Remote: on-site only 🏢"
+    return "Remote: any 🌍"
+
+
+def _kb_settings(sub: Subscription) -> dict:
+    remote_label = _fmt_remote(sub.remote)
+
+    internship_label = (
+        "Internships only ✅" if sub.internship_only else "Internships only ❌"
+    )
+    mode_label = (
+        "Tags mode: ANY ✅" if (sub.tags_mode or "any") == "any" else "Tags mode: ALL ✅"
+    )
+    active_label = (
+        "Notifications: ON ✅" if sub.is_active else "Notifications: OFF ⛔"
+    )
+
+    return {
+        "inline_keyboard": [
+            [{"text": remote_label, "callback_data": f"{CB_TOGGLE}:remote"}],
+            [{"text": internship_label, "callback_data": f"{CB_TOGGLE}:internship_only"}],
+            [{"text": mode_label, "callback_data": f"{CB_TOGGLE}:tags_mode"}],
+            [{"text": active_label, "callback_data": f"{CB_TOGGLE}:active"}],
+            [{"text": "⬅️ Back", "callback_data": f"{CB_MENU}:main"}],
+        ]
+    }
